@@ -1,0 +1,57 @@
+{
+  "Comment": "Orchestrates the weekly 50-task Golden Dataset evaluation across LLM targets.",
+  "StartAt": "HydrateDatasetStep",
+  "States": {
+    "HydrateDatasetStep": {
+      "Type": "Task",
+      "Resource": "${HydrateArn}",
+      "Comment": "Fetches 50 base tasks from Postgres and refreshes live ground-truth facts via web search.",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "RunModelInferencesStep"
+    },
+    "RunModelInferencesStep": {
+      "Type": "Task",
+      "Resource": "${RunnerArn}",
+      "Comment": "Asynchronously queries GPT-4o, Claude 3.5, Gemini Pro, and Llama 3.1 in parallel using Promise.allSettled.",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 4,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "EvaluateOutputsWithJudgeStep"
+    },
+    "EvaluateOutputsWithJudgeStep": {
+      "Type": "Task",
+      "Resource": "${JudgeArn}",
+      "Comment": "Deploys isolated GPT-4o instance to grade responses 1-5 and persists metrics into PostgreSQL.",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.Timeout",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 1.5
+        }
+      ],
+      "End": true
+    }
+  }
+}

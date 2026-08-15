@@ -1,0 +1,11 @@
+{
+  "execution_id": "local-test-run-001",
+  "hydrated_tasks": [
+    {
+      "task_id": "task_01",
+      "category": "Temporal & Live News",
+      "prompt": "What were the key takeaway statistics from the latest corporate earnings report released today?",
+      "dynamic_ground_truth": "Revenue: $15B, YoY Growth: 12%"
+    }
+  ]
+}

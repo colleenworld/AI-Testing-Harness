@@ -1,0 +1,14 @@
+{
+  "execution_id": "local-test-run-001",
+  "results": [
+    {
+      "model_name": "gpt-4o",
+      "task_id": "task_01",
+      "category": "Temporal & Live News",
+      "prompt": "What were the key takeaway statistics from the latest corporate earnings report released today?",
+      "raw_output": "The company reported a record revenue of $15B matching expectations, up 12% year over year.",
+      "ground_truth": "Revenue: $15B, YoY Growth: 12%",
+      "latency_ms": 1250
+    }
+  ]
+}
