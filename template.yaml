@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Secure Production Evaluation Harness Engine Infrastructure
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - test
+      - prod
+  ProjectName:
+    Type: String
+    Default: evaluation-harness
+
+  DbUsername:
+    Type: String
+    Default: db_eval_admin
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: nodejs18.x
+    Environment:
+      Variables:
+        NODE_ENV: !Ref Environment
+        DB_HOST: !GetAtt EvaluationDatabase.Endpoint.Address
+        DB_USER: !Ref DbUsername
+        # FIXED: Changed hyphen to underscore for valid Postgres naming rules
+        DB_NAME: !Sub "${ProjectName}_${Environment}_db"
+        DB_PORT: '5432'
+        DB_PASSWORD: !Sub '{{resolve:secretsmanager:${ProjectName}-${Environment}-db-secret:SecretString:password}}'
+        TAVILY_API_KEY: !Sub '{{resolve:secretsmanager:${ProjectName}/${Environment}/tavily:SecretString:apiKey}}'
+        GEMINI_API_KEY: !Sub '{{resolve:secretsmanager:${ProjectName}/${Environment}/gemini:SecretString:apiKey}}'
+        OPENROUTER_API_KEY: !Sub '{{resolve:secretsmanager:${ProjectName}/${Environment}/openrouter:SecretString:apiKey}}'
+        OPENAI_API_KEY: !Sub '{{resolve:secretsmanager:${ProjectName}/${Environment}/openai:SecretString:apiKey}}'
+
+Resources:
+  # Secure storage block for automatic database password generation
+  EvaluationDatabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}-${Environment}-db-secret"
+      Description: Generated master credentials for RDS PostgreSQL instance
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DbUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+
+  # Network access firewall controls
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow inbound PostgreSQL traffic from Lambda functions
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0 # Restrict this to your specific VPC CIDR block in production environments
+
+  # Relational database instance storage block
+  EvaluationDatabase:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: '20'
+      DBInstanceClass: db.t4g.micro
+      Engine: postgres
+      EngineVersion: '15'
+      MasterUsername: !Ref DbUsername
+      # FIXED: Securely pulls the generated secret string at deployment time
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${ProjectName}-${Environment}-db-secret:SecretString:password}}'
+      # FIXED: Replaced standard reference with valid underscore database naming substitution
+      DBName: !Sub "${ProjectName}_${Environment}_db"
+      VPCSecurityGroups:
+        - !GetAtt DatabaseSecurityGroup.GroupId
+      DeleteAutomatedBackups: true
+      SkipFinalSnapshot: true
+
+  # Pipelines Lambdas Serverless Execution Definitions
+  HydrateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      Handler: hydrate.handler
+
+  JudgeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      Handler: judge.handler
+
+  RunnerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      Handler: runner.handler
+
+Outputs:
+  DatabaseEndpoint:
+    Description: PostgreSQL Database connection endpoint address
+    Value: !GetAtt EvaluationDatabase.Endpoint.Address

@@ -1,11 +1,12 @@
-import { jest } from '@jest/globals';
+import { jest } from '@jest/globals'
 
-export const mockQuery = jest.fn().mockImplementation(() => {
-    return Promise.resolve({ rows: [] });
-});
+export const mockDbQuery = jest.fn().mockImplementation(() => {
+  return Promise.resolve({ rows: [] })
+})
 
 const poolMock = {
-    query: mockQuery
-};
+  query: mockDbQuery,
+  safeQuery: mockDbQuery
+}
 
-export default poolMock;
+export default poolMock

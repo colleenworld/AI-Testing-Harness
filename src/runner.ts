@@ -1,162 +1,156 @@
-import { Handler } from 'aws-lambda';
-import OpenAI from 'openai';
-import Anthropic from '@anthropic-ai/sdk';
-import { GoogleGenAI } from '@google/genai';
-import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
+import { Handler } from 'aws-lambda'
+import OpenAI from 'openai'
+import { GoogleGenAI } from '@google/genai'
+import pLimit from 'p-limit'
+import { EvalTask, RunnerEvent, ModelOutput } from './lib/types'
+import { logger } from './lib/logger'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const googleGenAI = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
-const bedrock = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
+const openrouter = new OpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY || 'mock-key',
+  baseURL: 'https://openrouter.ai'
+})
 
-interface EvalTask {
-    task_id: string;
-    category: string;
-    prompt: string;
-    dynamic_ground_truth: string;
-}
-
-interface RunnerEvent {
-    execution_id: string;
-    hydrated_tasks: EvalTask[];
-}
-
-interface ModelOutput {
-    model_name: string;
-    task_id: string;
-    category: string;
-    prompt: string;
-    raw_output: string;
-    ground_truth: string;
-    latency_ms: number;
-}
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'mock-key' })
 
 export const handler: Handler<RunnerEvent, any> = async (event) => {
-    const { execution_id, hydrated_tasks } = event;
-    const evaluationResults: ModelOutput[] = [];
+  const { execution_id, hydrated_tasks } = event
+  const evaluationResults: ModelOutput[] = []
+  const limit = pLimit(5)
 
-    // 2. Loop Through All 50 Golden Tasks Sequentially or in Batches
-    for (const task of hydrated_tasks) {
-        console.log(`Processing Task ID: ${task.task_id} across the model grid...`);
+  logger.info('Starting concurrent batch execution processing context', {
+    execution_id,
+    task_count: hydrated_tasks.length
+  })
 
-        // Define our 4 targeted parallel execution contexts
-        const inferencePromises = [
-            runGPT4o(task),
-            runClaude35(task),
-            runGeminiPro(task),
-            runLlama31Bedrock(task)
-        ];
+  const startTime = Date.now()
+  const inferenceQueue: Array<() => Promise<ModelOutput>> = []
 
-        // Execute all 4 model inferences completely in parallel
-        const results = await Promise.allSettled(inferencePromises);
+  for (const task of hydrated_tasks) {
+    inferenceQueue.push(
+      () => runDirectGeminiFlash(task),
+      () => runOpenRouterModel(task, 'google/gemini-2.5-flash:free'),
+      () => runOpenRouterModel(task, 'nvidia/nemotron-4-340b-instruct:free'),
+      () => runOpenRouterModel(task, 'meta-llama/llama-3.1-8b-instruct:free'),
+      () => runOpenRouterModel(task, 'openrouter/free')
+    )
+  }
 
-        results.forEach((result) => {
-            if (result.status === 'fulfilled') {
-                evaluationResults.push(result.value);
-            } else {
-                console.error(`Inference failure context: ${result.reason}`);
-            }
-        });
+  logger.debug('Inference queue built successfully, mapping actions to limited pool slots', {
+    execution_id,
+    total_inferences: inferenceQueue.length
+  })
+
+  // 3. BIND TO WORKER POOL AND DISPATCH SIMULTANEOUSLY
+  const workerPromises = inferenceQueue.map((inferenceTask) => {
+    return limit(async () => {
+      try {
+        return await inferenceTask()
+      }
+      catch (err) {
+        logger.error('Uncaught fatal request transaction error inside processing pool context', {
+          execution_id,
+          error: err instanceof Error ? err.message : String(err)
+        })
+        throw err
+      }
+    })
+  })
+
+  console.log(`📦 Dispatched ${workerPromises.length} independent model inferences to worker pool...`)
+
+  // 4. AWAIT BATCH COMPLETION COHESIVELY
+  const results = await Promise.allSettled(workerPromises)
+
+  results.forEach((result) => {
+    if (result.status === 'fulfilled') {
+      evaluationResults.push(result.value)
     }
+  })
 
-    // 3. Return payload directly to serve as Input for the downstream JudgeFunction Step Function State
-    return {
-        execution_id,
-        results: evaluationResults
-    };
-};
+  const totalDurationMs = Date.now() - startTime
+  logger.info('Inference processing batch completed successfully', {
+    execution_id,
+    duration_seconds: (totalDurationMs / 1000).toFixed(2),
+    total_records_processed: evaluationResults.length
+  })
 
-// --- API IMPLEMENTATION UTILITIES ---
-
-async function runGPT4o(task: EvalTask): Promise<ModelOutput> {
-    const start = Date.now();
-    const response = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: task.prompt }],
-        temperature: 0.1
-    });
-    return {
-        model_name: 'gpt-4o',
-        task_id: task.task_id,
-        category: task.category,
-        prompt: task.prompt,
-        raw_output: response.choices[0].message.content || '',
-        ground_truth: task.dynamic_ground_truth,
-        latency_ms: Date.now() - start
-    };
+  return {
+    execution_id,
+    results: evaluationResults
+  }
 }
 
-async function runClaude35(task: EvalTask): Promise<ModelOutput> {
-    const start = Date.now();
-    const response = await anthropic.messages.create({
-        model: 'claude-3-5-sonnet-20240620',
-        max_tokens: 1024,
-        messages: [{ role: 'user', content: task.prompt }],
-        temperature: 0.1
-    });
+// --- ISOLATED NETWORK WORKERS ---
 
-    // Fallback parsing for Anthropic content blocks
-    const textOutput = response.content[0].type === 'text' ? response.content[0].text : '';
-
+async function runDirectGeminiFlash(task: EvalTask): Promise<ModelOutput> {
+  const start = Date.now()
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: task.prompt,
+    })
     return {
-        model_name: 'claude-3-5-sonnet',
-        task_id: task.task_id,
-        category: task.category,
-        prompt: task.prompt,
-        raw_output: textOutput,
-        ground_truth: task.dynamic_ground_truth,
-        latency_ms: Date.now() - start
-    };
+      model_name: 'direct-gemini-2.5-flash',
+      task_id: task.task_id,
+      category: task.category,
+      prompt: task.prompt,
+      raw_output: response.text || '',
+      ground_truth: task.dynamic_ground_truth,
+      latency_ms: Date.now() - start
+    }
+  }
+  catch (err) {
+    logger.warn('Direct Google AI Studio provider transaction failed exception fallback active', {
+      task_id: task.task_id,
+      error_message: err instanceof Error ? err.message : String(err)
+    })
+    return {
+      model_name: 'direct-gemini-2.5-flash',
+      task_id: task.task_id,
+      category: task.category,
+      prompt: task.prompt,
+      raw_output: `Direct Gemini Error: ${err}`,
+      ground_truth: task.dynamic_ground_truth,
+      latency_ms: Date.now() - start
+    }
+  }
 }
 
-async function runGeminiPro(task: EvalTask): Promise<ModelOutput> {
-    const start = Date.now();
+async function runOpenRouterModel(task: EvalTask, modelSlug: string): Promise<ModelOutput> {
+  const start = Date.now()
+  try {
+    const response = await openrouter.chat.completions.create({
+      model: modelSlug,
+      messages: [ { role: 'user', content: task.prompt } ],
+      temperature: 0.2
+    })
 
-    // Pass the model name directly into the contents payload
-    const response = await googleGenAI.models.generateContent({
-        model: 'gemini-1.5-pro',
-        contents: task.prompt,
-    });
-
-    return {
-        model_name: 'gemini-1.5-pro',
-        task_id: task.task_id,
-        category: task.category,
-        prompt: task.prompt,
-        raw_output: response.text || '',
-        ground_truth: task.dynamic_ground_truth,
-        latency_ms: Date.now() - start
-    };
-}
-
-async function runLlama31Bedrock(task: EvalTask): Promise<ModelOutput> {
-    const start = Date.now();
-
-    // Structuring standard Meta Llama 3 invocation payload format
-    const payload = {
-        prompt: `<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n${task.prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n`,
-        max_gen_len: 512,
-        temperature: 0.1,
-        top_p: 0.9
-    };
-
-    const command = new InvokeModelCommand({
-        modelId: 'meta.llama3-1-8b-instruct-v1:0',
-        contentType: 'application/json',
-        accept: 'application/json',
-        body: JSON.stringify(payload)
-    });
-
-    const response = await bedrock.send(command);
-    const nativeResponseBody = JSON.parse(new TextDecoder().decode(response.body));
+    const outputText = response.choices?.[0]?.message?.content || ''
+    if (!outputText) throw new Error('Empty API response choices returned.')
 
     return {
-        model_name: 'llama-3-1-8b-instruct',
-        task_id: task.task_id,
-        category: task.category,
-        prompt: task.prompt,
-        raw_output: nativeResponseBody.generation || '',
-        ground_truth: task.dynamic_ground_truth,
-        latency_ms: Date.now() - start
-    };
+      model_name: modelSlug.replace(':free', ''),
+      task_id: task.task_id,
+      category: task.category,
+      prompt: task.prompt,
+      raw_output: outputText,
+      ground_truth: task.dynamic_ground_truth,
+      latency_ms: Date.now() - start
+    }
+  }
+  catch (err) {
+    logger.warn('Open Router provider transaction failed exception fallback active', {
+      task_id: task.task_id,
+      error_message: err instanceof Error ? err.message : String(err)
+    })
+    return {
+      model_name: modelSlug.replace(':free', ''),
+      task_id: task.task_id,
+      category: task.category,
+      prompt: task.prompt,
+      raw_output: `OpenRouter Error: ${err}`,
+      ground_truth: task.dynamic_ground_truth,
+      latency_ms: Date.now() - start
+    }
+  }
 }

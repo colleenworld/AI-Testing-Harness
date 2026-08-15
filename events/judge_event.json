@@ -1,14 +1,23 @@
 {
-  "execution_id": "local-test-run-001",
+  "execution_id": "demo-run-weekly-sync",
   "results": [
     {
-      "model_name": "gpt-4o",
-      "task_id": "task_01",
+      "model_name": "direct-gemini-2.0-flash",
+      "task_id": "task_1_01",
       "category": "Temporal & Live News",
-      "prompt": "What were the key takeaway statistics from the latest corporate earnings report released today?",
-      "raw_output": "The company reported a record revenue of $15B matching expectations, up 12% year over year.",
-      "ground_truth": "Revenue: $15B, YoY Growth: 12%",
-      "latency_ms": 1250
+      "prompt": "What were the top three structural takeaways...",
+      "raw_output": "The federal reserve slashed interest rates by 25 basis points citing cooling consumer index data.",
+      "ground_truth": "[Verified Fact Context]: Mocked interest rate cuts by 25 basis points.",
+      "latency_ms": 420
+    },
+    {
+      "model_name": "meta-llama/llama-3.1-8b-instruct",
+      "task_id": "task_1_01",
+      "category": "Temporal & Live News",
+      "prompt": "What were the top three structural takeaways...",
+      "raw_output": "Interest rates dropped by a quarter percentage point this week following federal meetings.",
+      "ground_truth": "[Verified Fact Context]: Mocked interest rate cuts by 25 basis points.",
+      "latency_ms": 310
     }
   ]
 }

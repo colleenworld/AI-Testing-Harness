@@ -1,0 +1,53 @@
+graph TD
+    %% Base Styling Definitions
+    classDef trigger fill:#FFE0B2,stroke:#FB8C00,stroke-width:2px,color:#000;
+    classDef process fill:#E3F2FD,stroke:#1E88E5,stroke-width:2px,color:#000;
+    classDef model fill:#E8F5E9,stroke:#43A047,stroke-width:2px,color:#000;
+    classDef judge fill:#F3E5F5,stroke:#8E24AA,stroke-width:2px,color:#000;
+    classDef storage fill:#ECEFF1,stroke:#546E7A,stroke-width:2px,color:#000;
+    classDef output fill:#FFF9C4,stroke:#FDD835,stroke-width:2px,color:#000;
+
+    %% 1. TRIGGER & INITIALIZATION
+    subgraph S1 [1. Automation Trigger]
+        A[GitHub Actions Cron<br>Every Sunday 00:00 UTC] --> B(Fetch 50-Task Golden Dataset<br>From Postgres Repo)
+        B --> C(Hydrate Dynamic Slots<br>Via Real-Time Live Search)
+    end
+    class A trigger; class B,C process;
+
+    %% 2. PARALLEL MODEL TEST HARNESS
+    subgraph S2 [2. Parallel Test Harness Execution]
+        C --> D{Async Payload Dispatcher}
+        D -->|Target 1| E1[gpt-4o]
+        D -->|Target 2| E2[claude-3-5-sonnet]
+        D -->|Target 3| E3[gemini-1.5-pro]
+        D -->|Target 4| E4[llama-3-1-8b-instruct]
+    end
+    class D process; class E1,E2,E3,E4 model;
+
+    %% 3. LLM-AS-A-JUDGE EVALUATION ENGINE
+    subgraph S3 [3. Automated Evaluation Matrix]
+        E1 & E2 & E3 & E4 --> F[Consolidate Raw Text Outputs]
+        F --> G(Deploy Isolated GPT-4o Evaluator<br>Using Strict Zero-Shot Rubric)
+        G --> H{Score Metrics 1-5}
+        H --> H1[Factuality & Synthesis]
+        H --> H2[Citation & Source Match]
+        H --> H3[Formatting & Layout Quality]
+    end
+    class F,H process; class G judge; class H1,H2,H3 storage;
+
+    %% 4. STORAGE & PERSISTENCE
+    subgraph S4 [4. Storage Layer]
+        H1 & H2 & H3 --> I(Compute API Token Cost<br>& Operational Latency)
+        I --> J[(PostgreSQL Production DB<br>Append Historical Metrics)]
+    end
+    class I process; class J storage;
+
+    %% 5. VISUALIZATION & ALERTING
+    subgraph S5 [5. Dashboard & Regression Engine]
+        J --> K[Streamlit / Next.js Public UI]
+        J --> L{Regression Check Engine<br>Moving Average Analytics}
+        K --> M1[Interactive Macro Trend Lines]
+        K --> M2[Cost vs Performance Scatter Plot]
+        L -->|Deficit > 5%| N[Trigger Real-Time Webhook<br>Slack / Discord / GitHub Issue]
+    end
+    class K,L process; class M1,M2,N output;

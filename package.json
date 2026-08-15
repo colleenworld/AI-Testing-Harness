@@ -6,26 +6,35 @@
   "scripts": {
     "build": "tsc",
     "test": "jest",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "lint": "eslint --fix --ext ./src/**/*.ts ."
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.24.0",
     "@aws-sdk/client-bedrock-runtime": "^3.600.0",
     "@google/genai": "^2.16.0",
     "axios": "^1.19.0",
-    "openai": "^4.104.0",
+    "openai": "^7.4.0",
     "p-limit": "^7.3.1",
     "pg": "^8.23.0",
     "winston": "^3.19.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@stylistic/eslint-plugin-ts": "^4.4.1",
     "@types/aws-lambda": "^8.10.143",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.14.0",
     "@types/pg": "^8.21.0",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
+    "@typescript-eslint/parser": "^8.67.0",
     "esbuild": "0.28.2",
+    "eslint": "^10.8.1",
+    "eslint-plugin-jsdoc": "^63.0.2",
     "jest": "^30.4.2",
+    "jsdoc": "^4.0.5",
+    "jsdoc-babel": "^0.5.0",
+    "prettier": "^3.9.6",
     "ts-jest": "^29.4.12",
     "typescript": "^5.4.5"
   },
@@ -33,6 +42,7 @@
   "allowScripts": {
     "@google/genai@2.17.1": true,
     "esbuild@0.28.2": true,
-    "protobufjs@7.6.5": true
+    "protobufjs@7.6.5": true,
+    "unrs-resolver@1.12.2": true
   }
 }

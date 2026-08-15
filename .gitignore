@@ -2,6 +2,9 @@
 /out-tsc
 
 /node_modules
+/.idea
+/.idea/**/*.*
+/.aws-sam
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -9,3 +12,5 @@ yarn-error.log*
 .pnp.js
 
 .vscode/*
+
+/aws/
