@@ -1,4 +1,4 @@
-const { defineConfig } = require('jest');
+const {defineConfig} = require('jest');
 
 module.exports = defineConfig({
     preset: 'ts-jest',
@@ -26,5 +26,14 @@ module.exports = defineConfig({
         '!<rootDir>/src/test/**',
         '!<rootDir>/src/lib/types.ts',
         '!<rootDir>/jest.config.js'
+    ],
+    reporters: [
+        "default",
+        ["jest-html-reporter", {
+            "pageTitle": "Test Execution Report",
+            "outputPath": "./reports/test-report.html",
+            "includeFailureMsg": true,
+            "includeConsoleLog": true
+        }]
     ]
 });

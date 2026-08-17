@@ -12,43 +12,36 @@ Parameters:
       - prod
   ProjectName:
     Type: String
-    Default: evaluation-harness
-
-  DbUsername:
-    Type: String
-    Default: db_eval_admin
+    Default: evaluation
 
 Globals:
   Function:
     Timeout: 30
     MemorySize: 512
-    Runtime: nodejs18.x
+    Runtime: nodejs24.x
     Environment:
       Variables:
         NODE_ENV: !Ref Environment
         DB_HOST: !GetAtt EvaluationDatabase.Endpoint.Address
-        DB_USER: !Ref DbUsername
-        # FIXED: Changed hyphen to underscore for valid Postgres naming rules
-        DB_NAME: !Sub "${ProjectName}_${Environment}_db"
         DB_PORT: '5432'
-        DB_PASSWORD: !Sub '{{resolve:secretsmanager:${ProjectName}-${Environment}-db-secret:SecretString:password}}'
-        TAVILY_API_KEY: !Sub '{{resolve:secretsmanager:${ProjectName}/${Environment}/tavily:SecretString:apiKey}}'
-        GEMINI_API_KEY: !Sub '{{resolve:secretsmanager:${ProjectName}/${Environment}/gemini:SecretString:apiKey}}'
-        OPENROUTER_API_KEY: !Sub '{{resolve:secretsmanager:${ProjectName}/${Environment}/openrouter:SecretString:apiKey}}'
-        OPENAI_API_KEY: !Sub '{{resolve:secretsmanager:${ProjectName}/${Environment}/openai:SecretString:apiKey}}'
+        TAVILY_API_KEY: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' ,!Ref Environment, '/SecretString:tavily}}' ] ]
+        GEMINI_API_KEY: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' , !Ref Environment, '/SecretString:gemini}}' ] ]
+        OPENROUTER_API_KEY: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' , !Ref Environment, '/SecretString:openrouter}}' ] ]
+        OPENAI_API_KEY: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' , !Ref Environment, '/SecretString:openapi}}' ] ]
+        DB_PASSWORD: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/', !Ref Environment, '/SecretString:password}}' ] ]
 
 Resources:
   # Secure storage block for automatic database password generation
   EvaluationDatabaseSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: !Sub "${ProjectName}-${Environment}-db-secret"
+      Name: !Sub "${ProjectName}-${Environment}"
       Description: Generated master credentials for RDS PostgreSQL instance
       GenerateSecretString:
-        SecretStringTemplate: !Sub '{"username": "${DbUsername}"}'
+        SecretStringTemplate: '{ \"username\": \"dbadmin\" }'
         GenerateStringKey: password
         PasswordLength: 32
-        ExcludeCharacters: '"@/\'
+        ExcludeCharacters: '"@/\` ()[]{}<>;:,.-=_+*&^%$#|~?'
 
   # Network access firewall controls
   DatabaseSecurityGroup:
@@ -68,37 +61,134 @@ Resources:
       AllocatedStorage: '20'
       DBInstanceClass: db.t4g.micro
       Engine: postgres
-      EngineVersion: '15'
-      MasterUsername: !Ref DbUsername
-      # FIXED: Securely pulls the generated secret string at deployment time
-      MasterUserPassword: !Sub '{{resolve:secretsmanager:${ProjectName}-${Environment}-db-secret:SecretString:password}}'
-      # FIXED: Replaced standard reference with valid underscore database naming substitution
+      EngineVersion: '18'
+      MasterUsername: evaladmin
+      MasterUserPassword: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' ,!Ref Environment, 'SecretString:password}}' ] ]
       DBName: !Sub "${ProjectName}_${Environment}_db"
       VPCSecurityGroups:
         - !GetAtt DatabaseSecurityGroup.GroupId
       DeleteAutomatedBackups: true
-      SkipFinalSnapshot: true
 
+  # 8. Decoupled Intermediary API Lambda attached to our REST Gateway
+  # 8. Decoupled Intermediary API Lambda attached to our REST Gateway
   # Pipelines Lambdas Serverless Execution Definitions
   HydrateFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ./src
       Handler: hydrate.handler
-
-  JudgeFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: ./src
-      Handler: judge.handler
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2022"
+        Sourcemap: true
+        EntryPoints:
+          - hydrate.ts
 
   RunnerFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ./src
       Handler: runner.handler
+      Events:
+        DailyInferenceRunnerSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: 'cron(0 2 * * ? *)'
+            Description: Trigger concurrent model batches daily at 2 AM UTC after hydration finishes
+            Enabled: true
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2022"
+        Sourcemap: true
+        EntryPoints:
+          - runner.ts
+
+  JudgeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      Handler: judge.handler
+      Events:
+        DailyJudgeSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: 'cron(30 2 * * ? *)'
+            Description: Trigger metrics evaluation daily at 2:30 AM UTC
+            Enabled: true
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2022"
+        Sourcemap: true
+        EntryPoints:
+          - judge.ts
+
+  # Decoupled Intermediary API Lambda attached to our REST Gateway
+  ApiHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src
+      Handler: apiHandler.handler
+      Events:
+        GetEvaluationsApi:
+          Type: Api
+          Properties:
+            Path: /v1/evaluations
+            Method: GET
+            RestApiId: !Ref EvaluationApiGateway
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2022"
+        Sourcemap: true
+        EntryPoints:
+          - apiHandler.ts
+
+  EvaluationApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Environment
+      ApiKeySourceType: HEADER # Instructs the edge to parse keys from the 'x-api-key' header
+      Auth:
+        ApiKeyRequired: true # Enforces global API key restriction across all routes natively
+      Cors:
+        AllowOrigin: "'http://localhost:3000'"
+        AllowHeaders: "'Content-Type,X-Api-Key'"
+        AllowMethods: "'GET,POST,OPTIONS'"
+
+    # 2. FIXED: Creates a secure API Key asset token inside API Gateway
+  EvaluationApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Name: !Sub "${ProjectName}-${Environment}-api-key"
+      Enabled: true
+      GenerateDistinctId: true
+
+    # 3. FIXED: Links your generated API Key to an active usage billing plan
+  EvaluationUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      UsagePlanName: !Sub "${ProjectName}-${Environment}-usage-plan"
+      Description: Global throttle limits and key assignments for frontend dashboard access
+      ApiStages:
+        - ApiId: !Ref EvaluationApiGateway
+          Stage: !Ref Environment
+
+    # 4. FIXED: Binds the API Key token to the usage plan framework
+  EvaluationUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref EvaluationApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref EvaluationUsagePlan
 
 Outputs:
-  DatabaseEndpoint:
-    Description: PostgreSQL Database connection endpoint address
-    Value: !GetAtt EvaluationDatabase.Endpoint.Address
+  ApiEndpointUrl:
+    Description: Secured HTTP API Execution entry path point
+    Value: !Sub "https://${EvaluationApiGateway}.execute-api.${AWS::Region}://{Environment}"
