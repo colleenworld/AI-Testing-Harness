@@ -22,6 +22,8 @@ Globals:
     Environment:
       Variables:
         NODE_ENV: !Ref Environment
+        DB_USER: evaladmin
+        DB_NAME: !Sub "${ProjectName}_${Environment}_db"
         DB_HOST: !GetAtt EvaluationDatabase.Endpoint.Address
         DB_PORT: '5432'
         TAVILY_API_KEY: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' ,!Ref Environment, '/SecretString:tavily}}' ] ]
