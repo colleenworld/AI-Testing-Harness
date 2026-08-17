@@ -2,7 +2,7 @@ import { Pool } from 'pg'
 import { logger } from './logger'
 import { schema } from './schema'
 
-const pool = new Pool({
+const poolSettings = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -11,7 +11,9 @@ const pool = new Pool({
   max: 1,
   idleTimeoutMillis: 1000,
   connectionTimeoutMillis: 5000
-})
+}
+
+const pool = new Pool(poolSettings)
 
 let isSchemaInitialized = false
 
