@@ -17,4 +17,5 @@ export interface EvaluationResult {
         formatting?: number;
         error_log?: string;
     };
+    created_at: string;
 }

@@ -23,7 +23,7 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
       params.push(category)
     }
 
-    queryText += ' ORDER BY created_at DESC LIMIT 100'
+    queryText += ' ORDER BY created_at ASC LIMIT 200'
 
     const dbResult = await safeQuery(queryText, params)
 
