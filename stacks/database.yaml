@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: PostgreSQL database for the Evaluation Harness
+
+Parameters:
+  ProjectName:
+    Type: String
+
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - test
+      - prod
+
+  DbUsername:
+    Type: String
+    Default: evaladmin
+    MinLength: 1
+    MaxLength: 63
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    Description: PostgreSQL master username
+
+  RdsSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group created for RDS by the network stack
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs for the RDS subnet group
+
+Conditions:
+  IsProduction: !Equals [!Ref Environment, prod]
+
+Resources:
+  EvaluationDatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for the Evaluation Harness database
+      SubnetIds: !Ref PrivateSubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-${ProjectName}-database-subnet-group"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+  EvaluationDatabase:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub "${Environment}-${ProjectName}-postgres"
+
+      Engine: postgres
+      EngineVersion: '18'
+      DBInstanceClass: db.t4g.micro
+
+      AllocatedStorage: 20
+      MaxAllocatedStorage: 100
+      StorageType: gp3
+      StorageEncrypted: true
+
+      DBName: !Sub "${ProjectName}${Environment}db"
+      Port: 5432
+
+      MasterUsername: !Ref DbUsername
+      ManageMasterUserPassword: true
+
+      DBSubnetGroupName: !Ref EvaluationDatabaseSubnetGroup
+      VPCSecurityGroups:
+        - !Ref RdsSecurityGroupId
+
+      PubliclyAccessible: false
+      MultiAZ: !If [IsProduction, true, false]
+
+      BackupRetentionPeriod: !If [IsProduction, 7, 1]
+      DeleteAutomatedBackups: false
+      CopyTagsToSnapshot: true
+
+      DeletionProtection: !If [IsProduction, true, false]
+      AutoMinorVersionUpgrade: true
+
+      EnablePerformanceInsights: !If [IsProduction, true, false]
+      PerformanceInsightsRetentionPeriod: !If
+        - IsProduction
+        - 7
+        - !Ref AWS::NoValue
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${Environment}-${ProjectName}-postgres"
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: !Ref ProjectName
+
+Outputs:
+  DatabaseEndpoint:
+    Description: PostgreSQL database endpoint
+    Value: !GetAtt EvaluationDatabase.Endpoint.Address
+
+  DatabasePort:
+    Description: PostgreSQL database port
+    Value: !GetAtt EvaluationDatabase.Endpoint.Port
+
+  DatabaseName:
+    Description: PostgreSQL database name
+    Value: !Sub "${ProjectName}${Environment}db"
+
+  DatabaseSecretArn:
+    Description: ARN of the RDS-managed master credential secret
+    Value: !GetAtt EvaluationDatabase.MasterUserSecret.SecretArn
+
+  DatabaseInstanceIdentifier:
+    Description: RDS database instance identifier
+    Value: !Ref EvaluationDatabase
+
+  DatabaseSubnetGroupName:
+    Description: RDS database subnet group
+    Value: !Ref EvaluationDatabaseSubnetGroup

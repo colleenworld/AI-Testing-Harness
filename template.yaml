@@ -10,187 +10,213 @@ Parameters:
       - dev
       - test
       - prod
+
   ProjectName:
     Type: String
     Default: evaluation
 
-Globals:
-  Function:
-    Timeout: 30
-    MemorySize: 512
-    Runtime: nodejs24.x
-    Environment:
-      Variables:
-        NODE_ENV: !Ref Environment
-        DB_USER: evaladmin
-        DB_NAME: !Sub "${ProjectName}_${Environment}_db"
-        DB_HOST: !GetAtt EvaluationDatabase.Endpoint.Address
-        DB_PORT: '5432'
-        TAVILY_API_KEY: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' ,!Ref Environment, '/SecretString:tavily}}' ] ]
-        GEMINI_API_KEY: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' , !Ref Environment, '/SecretString:gemini}}' ] ]
-        OPENROUTER_API_KEY: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' , !Ref Environment, '/SecretString:openrouter}}' ] ]
-        OPENAI_API_KEY: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' , !Ref Environment, '/SecretString:openapi}}' ] ]
-        DB_PASSWORD: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/', !Ref Environment, '/SecretString:password}}' ] ]
+  FrontendOrigin:
+    Type: String
+    Default: http://localhost:3000
+    Description: Frontend origin allowed to access the API
+
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+    AllowedValues:
+      - 3
+      - 7
+      - 30
+
+  RunnerSchedule:
+    Type: String
+    Default: cron(0 2 * * ? *)
+    Description: EventBridge schedule for evaluation runs
+
+  JudgeSchedule:
+    Type: String
+    Default: cron(30 2 * * ? *)
+    Description: EventBridge schedule for judging completed runs
 
 Resources:
-  # Secure storage block for automatic database password generation
-  EvaluationDatabaseSecret:
-    Type: AWS::SecretsManager::Secret
+  NetworkStack:
+    Type: AWS::Serverless::Application
     Properties:
-      Name: !Sub "${ProjectName}-${Environment}"
-      Description: Generated master credentials for RDS PostgreSQL instance
-      GenerateSecretString:
-        SecretStringTemplate: '{ \"username\": \"dbadmin\" }'
-        GenerateStringKey: password
-        PasswordLength: 32
-        ExcludeCharacters: '"@/\` ()[]{}<>;:,.-=_+*&^%$#|~?'
+      Location: ./stacks/network.yaml
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
 
-  # Network access firewall controls
-  DatabaseSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
+  DatabaseStack:
+    Type: AWS::Serverless::Application
     Properties:
-      GroupDescription: Allow inbound PostgreSQL traffic from Lambda functions
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          CidrIp: 0.0.0.0/0 # Restrict this to your specific VPC CIDR block in production environments
+      Location: ./stacks/database.yaml
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        RdsSecurityGroupId:
+          !GetAtt NetworkStack.Outputs.RdsSecurityGroupId
+        PrivateSubnetIds:
+          !GetAtt NetworkStack.Outputs.PrivateSubnetIds
 
-  # Relational database instance storage block
-  EvaluationDatabase:
-    Type: AWS::RDS::DBInstance
+  LambdaRoleStack:
+    Type: AWS::Serverless::Application
     Properties:
-      AllocatedStorage: '20'
-      DBInstanceClass: db.t4g.micro
-      Engine: postgres
-      EngineVersion: '18'
-      MasterUsername: evaladmin
-      MasterUserPassword: !Join [ '', [ '{{resolve:secretsmanager:', !Ref ProjectName, '-keys/' ,!Ref Environment, 'SecretString:password}}' ] ]
-      DBName: !Sub "${ProjectName}_${Environment}_db"
-      VPCSecurityGroups:
-        - !GetAtt DatabaseSecurityGroup.GroupId
-      DeleteAutomatedBackups: true
+      Location: ./stacks/lambda_role.yaml
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        DatabaseSecretArn:
+          !GetAtt DatabaseStack.Outputs.DatabaseSecretArn
 
-  # 8. Decoupled Intermediary API Lambda attached to our REST Gateway
-  # 8. Decoupled Intermediary API Lambda attached to our REST Gateway
-  # Pipelines Lambdas Serverless Execution Definitions
-  HydrateFunction:
-    Type: AWS::Serverless::Function
+  HydrateStack:
+    Type: AWS::Serverless::Application
     Properties:
-      CodeUri: ./src
-      Handler: hydrate.handler
-    Metadata:
-      BuildMethod: esbuild
-      BuildProperties:
-        Minify: false
-        Target: "es2022"
-        Sourcemap: true
-        EntryPoints:
-          - hydrate.ts
+      Location: ./stacks/hydrate.yaml
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
 
-  RunnerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: ./src
-      Handler: runner.handler
-      Events:
-        DailyInferenceRunnerSchedule:
-          Type: Schedule
-          Properties:
-            Schedule: 'cron(0 2 * * ? *)'
-            Description: Trigger concurrent model batches daily at 2 AM UTC after hydration finishes
-            Enabled: true
-    Metadata:
-      BuildMethod: esbuild
-      BuildProperties:
-        Minify: false
-        Target: "es2022"
-        Sourcemap: true
-        EntryPoints:
-          - runner.ts
+        LambdaExecutionRole:
+          !GetAtt LambdaRoleStack.Outputs.LambdaExecutionRoleArn
 
-  JudgeFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: ./src
-      Handler: judge.handler
-      Events:
-        DailyJudgeSchedule:
-          Type: Schedule
-          Properties:
-            Schedule: 'cron(30 2 * * ? *)'
-            Description: Trigger metrics evaluation daily at 2:30 AM UTC
-            Enabled: true
-    Metadata:
-      BuildMethod: esbuild
-      BuildProperties:
-        Minify: false
-        Target: "es2022"
-        Sourcemap: true
-        EntryPoints:
-          - judge.ts
+        LambdaSecurityGroupId:
+          !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
 
-  # Decoupled Intermediary API Lambda attached to our REST Gateway
-  ApiHandlerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: ./src
-      Handler: apiHandler.handler
-      Events:
-        GetEvaluationsApi:
-          Type: Api
-          Properties:
-            Path: /v1/evaluations
-            Method: GET
-            RestApiId: !Ref EvaluationApiGateway
-    Metadata:
-      BuildMethod: esbuild
-      BuildProperties:
-        Minify: false
-        Target: "es2022"
-        Sourcemap: true
-        EntryPoints:
-          - apiHandler.ts
+        PrivateSubnetIds:
+          !GetAtt NetworkStack.Outputs.PrivateSubnetIds
 
-  EvaluationApiGateway:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: !Ref Environment
-      ApiKeySourceType: HEADER # Instructs the edge to parse keys from the 'x-api-key' header
-      Auth:
-        ApiKeyRequired: true # Enforces global API key restriction across all routes natively
-      Cors:
-        AllowOrigin: "'http://localhost:3000'"
-        AllowHeaders: "'Content-Type,X-Api-Key'"
-        AllowMethods: "'GET,POST,OPTIONS'"
+        DatabaseEndpoint:
+          !GetAtt DatabaseStack.Outputs.DatabaseEndpoint
 
-    # 2. FIXED: Creates a secure API Key asset token inside API Gateway
-  EvaluationApiKey:
-    Type: AWS::ApiGateway::ApiKey
-    Properties:
-      Name: !Sub "${ProjectName}-${Environment}-api-key"
-      Enabled: true
-      GenerateDistinctId: true
+        DatabasePort:
+          !GetAtt DatabaseStack.Outputs.DatabasePort
 
-    # 3. FIXED: Links your generated API Key to an active usage billing plan
-  EvaluationUsagePlan:
-    Type: AWS::ApiGateway::UsagePlan
-    Properties:
-      UsagePlanName: !Sub "${ProjectName}-${Environment}-usage-plan"
-      Description: Global throttle limits and key assignments for frontend dashboard access
-      ApiStages:
-        - ApiId: !Ref EvaluationApiGateway
-          Stage: !Ref Environment
+        DatabaseName:
+          !GetAtt DatabaseStack.Outputs.DatabaseName
 
-    # 4. FIXED: Binds the API Key token to the usage plan framework
-  EvaluationUsagePlanKey:
-    Type: AWS::ApiGateway::UsagePlanKey
+        DatabaseSecretArn:
+          !GetAtt DatabaseStack.Outputs.DatabaseSecretArn
+
+        LogRetentionDays: !Ref LogRetentionDays
+
+  RunnerStack:
+    Type: AWS::Serverless::Application
     Properties:
-      KeyId: !Ref EvaluationApiKey
-      KeyType: API_KEY
-      UsagePlanId: !Ref EvaluationUsagePlan
+      Location: ./stacks/runner.yaml
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+
+        LambdaExecutionRole:
+          !GetAtt LambdaRoleStack.Outputs.LambdaExecutionRoleArn
+
+        LambdaSecurityGroupId:
+          !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
+
+        PrivateSubnetIds:
+          !GetAtt NetworkStack.Outputs.PrivateSubnetIds
+
+        DatabaseEndpoint:
+          !GetAtt DatabaseStack.Outputs.DatabaseEndpoint
+
+        DatabasePort:
+          !GetAtt DatabaseStack.Outputs.DatabasePort
+
+        DatabaseName:
+          !GetAtt DatabaseStack.Outputs.DatabaseName
+
+        DatabaseSecretArn:
+          !GetAtt DatabaseStack.Outputs.DatabaseSecretArn
+
+        LogRetentionDays: !Ref LogRetentionDays
+        Schedule: !Ref RunnerSchedule
+
+  JudgeStack:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ./stacks/judge.yaml
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+
+        LambdaExecutionRole:
+          !GetAtt LambdaRoleStack.Outputs.LambdaExecutionRoleArn
+
+        LambdaSecurityGroupId:
+          !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
+
+        PrivateSubnetIds:
+          !GetAtt NetworkStack.Outputs.PrivateSubnetIds
+
+        DatabaseEndpoint:
+          !GetAtt DatabaseStack.Outputs.DatabaseEndpoint
+
+        DatabasePort:
+          !GetAtt DatabaseStack.Outputs.DatabasePort
+
+        DatabaseName:
+          !GetAtt DatabaseStack.Outputs.DatabaseName
+
+        DatabaseSecretArn:
+          !GetAtt DatabaseStack.Outputs.DatabaseSecretArn
+
+        LogRetentionDays: !Ref LogRetentionDays
+        Schedule: !Ref JudgeSchedule
+
+  ApiStack:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ./stacks/api.yaml
+      Parameters:
+        Environment: !Ref Environment
+        ProjectName: !Ref ProjectName
+        FrontendOrigin: !Ref FrontendOrigin
+
+        LambdaExecutionRole:
+          !GetAtt LambdaRoleStack.Outputs.LambdaExecutionRoleArn
+
+        LambdaSecurityGroupId:
+          !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
+
+        PrivateSubnetIds:
+          !GetAtt NetworkStack.Outputs.PrivateSubnetIds
+
+        DatabaseEndpoint:
+          !GetAtt DatabaseStack.Outputs.DatabaseEndpoint
+
+        DatabasePort:
+          !GetAtt DatabaseStack.Outputs.DatabasePort
+
+        DatabaseName:
+          !GetAtt DatabaseStack.Outputs.DatabaseName
+
+        DatabaseSecretArn:
+          !GetAtt DatabaseStack.Outputs.DatabaseSecretArn
+
+        LogRetentionDays: !Ref LogRetentionDays
 
 Outputs:
   ApiEndpointUrl:
-    Description: Secured HTTP API Execution entry path point
-    Value: !Sub "https://${EvaluationApiGateway}.execute-api.${AWS::Region}://{Environment}"
+    Description: Secured API Gateway endpoint
+    Value: !GetAtt ApiStack.Outputs.ApiGatewayUrl
+
+  VpcId:
+    Description: Evaluation Harness VPC ID
+    Value: !GetAtt NetworkStack.Outputs.VpcId
+
+  DatabaseEndpoint:
+    Description: Evaluation database endpoint
+    Value: !GetAtt DatabaseStack.Outputs.DatabaseEndpoint
+
+  HydrateLambdaArn:
+    Description: Hydrate Lambda ARN
+    Value: !GetAtt HydrateStack.Outputs.HydrateLambdaArn
+
+  RunnerLambdaArn:
+    Description: Runner Lambda ARN
+    Value: !GetAtt RunnerStack.Outputs.RunnerLambdaArn
+
+  JudgeLambdaArn:
+    Description: Judge Lambda ARN
+    Value: !GetAtt JudgeStack.Outputs.JudgeLambdaArn

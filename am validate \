@@ -1,0 +1,66 @@
+{
+    "Parameters": [
+        {
+            "ParameterKey": "ProjectName",
+            "DefaultValue": "evaluation",
+            "ParameterType": "String",
+            "NoEcho": false,
+            "ParameterConstraints": {}
+        },
+        {
+            "ParameterKey": "DashboardApiKeyToken",
+            "DefaultValue": "vn2cyz37EzYA4ivBYAYhKVr9YfUZsabh",
+            "ParameterType": "String",
+            "NoEcho": true,
+            "Description": "Token used by the dashboard to access the API",
+            "ParameterConstraints": {}
+        },
+        {
+            "ParameterKey": "Environment",
+            "DefaultValue": "dev",
+            "ParameterType": "String",
+            "NoEcho": false,
+            "ParameterConstraints": {
+                "AllowedValues": [
+                    "dev",
+                    "test",
+                    "prod"
+                ]
+            }
+        },
+        {
+            "ParameterKey": "LogRetentionDays",
+            "DefaultValue": "7",
+            "ParameterType": "Number",
+            "NoEcho": false,
+            "ParameterConstraints": {
+                "AllowedValues": [
+                    "3",
+                    "7",
+                    "30"
+                ]
+            }
+        },
+        {
+            "ParameterKey": "RunnerSchedule",
+            "DefaultValue": "cron(0 2 * * ? *)",
+            "ParameterType": "String",
+            "NoEcho": false,
+            "Description": "EventBridge schedule for evaluation runs",
+            "ParameterConstraints": {}
+        },
+        {
+            "ParameterKey": "JudgeSchedule",
+            "DefaultValue": "cron(30 2 * * ? *)",
+            "ParameterType": "String",
+            "NoEcho": false,
+            "Description": "EventBridge schedule for judging completed runs",
+            "ParameterConstraints": {}
+        }
+    ],
+    "Description": "Secure Production Evaluation Harness Engine Infrastructure",
+    "Version": "2010-09-09",
+    "DeclaredTransforms": [
+        "AWS::Serverless-2016-10-31"
+    ]
+}

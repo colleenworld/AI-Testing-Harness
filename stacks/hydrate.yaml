@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Hydration Lambda for the Evaluation Harness
+
+Parameters:
+  ProjectName:
+    Type: String
+
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - test
+      - prod
+
+  LambdaExecutionRole:
+    Type: String
+    Description: ARN of the IAM role used by the Hydrate Lambda
+
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+
+  LambdaSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for Evaluation Harness Lambda functions
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs in which Lambda network interfaces are created
+
+  DatabaseEndpoint:
+    Type: String
+
+  DatabasePort:
+    Type: String
+
+  DatabaseName:
+    Type: String
+
+  DatabaseSecretArn:
+    Type: String
+
+Resources:
+  HydrateLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${Environment}-${ProjectName}-hydrate"
+      RetentionInDays: !Ref LogRetentionDays
+
+  HydrateLambda:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - HydrateLogGroup
+    Properties:
+      FunctionName: !Sub "${Environment}-${ProjectName}-hydrate"
+      Description: Hydrates evaluation data for subsequent model runs
+
+      CodeUri: ../src
+      Handler: hydrate.handler
+      Runtime: nodejs24.x
+
+      Architectures:
+        - x86_64
+
+      MemorySize: 512
+      Timeout: 30
+      Tracing: Active
+
+      Role: !Ref LambdaExecutionRole
+
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+        SubnetIds: !Ref PrivateSubnetIds
+
+      Layers:
+        - !Sub >-
+          {{resolve:ssm:/aws/service/aws-parameters-and-secrets-lambda-extension/x86/latest}}
+
+      Environment:
+        Variables:
+          NODE_ENV: !Ref Environment
+          PARAMETERS_SECRETS_EXTENSION_HTTP_PORT: '2773'
+          PARAMETERS_SECRETS_EXTENSION_LOG_LEVEL: INFO
+          SECRETS_MANAGER_TTL: '300'
+          DB_HOST: !Ref DatabaseEndpoint
+          DB_PORT: !Ref DatabasePort
+          DB_NAME: !Ref DatabaseName
+          DB_SECRET_ARN: !Ref DatabaseSecretArn
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - hydrate.ts
+        Target: es2022
+        Minify: true
+        Sourcemap: true
+        Loader:
+          - .pem=text
+Outputs:
+  HydrateLambdaArn:
+    Description: ARN of the Hydrate Lambda function
+    Value: !GetAtt HydrateLambda.Arn
+
+  HydrateLambdaName:
+    Description: Name of the Hydrate Lambda function
+    Value: !Ref HydrateLambda
+
+  HydrateLogGroupName:
+    Description: CloudWatch Logs log group for the Hydrate Lambda
+    Value: !Ref HydrateLogGroup

@@ -11,9 +11,19 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const category = event.queryStringParameters?.category || 'All'
     let queryText = `
-      SELECT id, task_id, category, prompt, raw_output, ground_truth,
-             latency_ms, model_version, prompt_tokens, completion_tokens,
-             total_tokens, calculated_cost_usd, parsed_metrics
+      SELECT id,
+             task_id,
+             category,
+             prompt,
+             raw_output,
+             ground_truth,
+             latency_ms,
+             model_version,
+             prompt_tokens,
+             completion_tokens,
+             total_tokens,
+             calculated_cost_usd,
+             parsed_metrics
       FROM evaluation_results
     `
     const params: any[] = []
@@ -26,22 +36,23 @@ export async function handler(event: APIGatewayProxyEvent): Promise<APIGatewayPr
     queryText += ' ORDER BY created_at ASC LIMIT 200'
 
     const dbResult = await safeQuery(queryText, params)
-
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': 'http://localhost:3000'
-      },
-      body: JSON.stringify(dbResult.rows)
-    }
+    return jsonResponse(200, dbResult.rows)
   }
   catch (error: any) {
     logger.error('API Handler failed to extract evaluation records:', { error: error.message })
-    return {
-      statusCode: 500,
-      headers: { 'Access-Control-Allow-Origin': 'http://localhost:3000' },
-      body: JSON.stringify({ error: 'Internal Database Retrieval Failure' })
-    }
+    return jsonResponse(500, { error: 'Internal Database Retrieval Failure' })
+  }
+}
+
+function jsonResponse(statusCode: number, body: unknown) {
+  return {
+    statusCode,
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin':
+          process.env.FRONTEND_ORIGIN ?? 'http://localhost:3000',
+      'Vary': 'Origin'
+    },
+    body: JSON.stringify(body)
   }
 }

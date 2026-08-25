@@ -1,0 +1,13 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "evaluation"
+resolve_s3 = true
+s3_prefix = "evaluation"
+confirm_changeset = true
+capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
+image_repositories = []
+parameter_overrides = "Environment=\"dev\" ProjectName=\"evaluation\" LogRetentionDays=\"7\" RunnerSchedule=\"cron(0 2 * * ? *)\" JudgeSchedule=\"cron(30 2 * * ? *)\""
+disable_rollback = false
+[default.global.parameters]
+region = "us-west-2"

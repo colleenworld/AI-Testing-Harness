@@ -1,9 +1,9 @@
 import { Handler } from 'aws-lambda'
 import { GoogleGenAI } from '@google/genai'
-import pool from './lib/dbPool'
 import { JudgeEvent, JudgeScores } from './lib/types'
 import { z } from 'zod'
 import { logger } from './lib/logger'
+import { safeQuery } from './lib/dbPool'
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' })
 
@@ -29,7 +29,7 @@ export const handler: Handler<JudgeEvent, any> = async (event) => {
                     score_citation, score_formatting, latency_ms
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
             `
-      return pool.query(queryText, [
+      return safeQuery(queryText, [
         execution_id,
         run.task_id,
         run.category,

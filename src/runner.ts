@@ -2,20 +2,24 @@ import { Handler } from 'aws-lambda'
 import OpenAI from 'openai'
 import { GoogleGenAI } from '@google/genai'
 import pLimit from 'p-limit'
-import { EvalTask, RunnerEvent, ModelOutput } from './lib/types'
+import { EvalTask, RunnerEvent } from './lib/types'
+import { ModelOutput } from './lib/class/ModelOutput'
 import { logger } from './lib/logger'
-
-const openrouter = new OpenAI({
-  apiKey: process.env.OPENROUTER_API_KEY || 'mock-key',
-  baseURL: 'https://openrouter.ai'
-})
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'mock-key' })
+let openrouter: OpenAI
+let ai: GoogleGenAI
 
 export const handler: Handler<RunnerEvent, any> = async (event) => {
   const { execution_id, hydrated_tasks } = event
   const evaluationResults: ModelOutput[] = []
   const limit = pLimit(5)
+  // @ts-ignore
+
+  openrouter = new OpenAI({
+    apiKey: process.env.OPENAPI_KEY,
+    baseURL: 'https://openrouter.ai'
+  })
+
+  ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || 'mock-key' })
 
   logger.info('Starting concurrent batch execution processing context', {
     execution_id,
@@ -40,7 +44,6 @@ export const handler: Handler<RunnerEvent, any> = async (event) => {
     total_inferences: inferenceQueue.length
   })
 
-  // 3. BIND TO WORKER POOL AND DISPATCH SIMULTANEOUSLY
   const workerPromises = inferenceQueue.map((inferenceTask) => {
     return limit(async () => {
       try {
@@ -56,9 +59,8 @@ export const handler: Handler<RunnerEvent, any> = async (event) => {
     })
   })
 
-  console.log(`📦 Dispatched ${workerPromises.length} independent model inferences to worker pool...`)
+  logger.info(`📦 Dispatched ${workerPromises.length} independent model inferences to worker pool...`)
 
-  // 4. AWAIT BATCH COMPLETION COHESIVELY
   const results = await Promise.allSettled(workerPromises)
 
   results.forEach((result) => {
@@ -84,35 +86,20 @@ export const handler: Handler<RunnerEvent, any> = async (event) => {
 
 async function runDirectGeminiFlash(task: EvalTask): Promise<ModelOutput> {
   const start = Date.now()
+  const model = 'gemini-2.5-flash'
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: task.prompt,
     })
-    return {
-      model_name: 'direct-gemini-2.5-flash',
-      task_id: task.task_id,
-      category: task.category,
-      prompt: task.prompt,
-      raw_output: response.text || '',
-      ground_truth: task.dynamic_ground_truth,
-      latency_ms: Date.now() - start
-    }
+    return new ModelOutput(model, task, response.text || '', Date.now() - start)
   }
   catch (err) {
     logger.warn('Direct Google AI Studio provider transaction failed exception fallback active', {
       task_id: task.task_id,
       error_message: err instanceof Error ? err.message : String(err)
     })
-    return {
-      model_name: 'direct-gemini-2.5-flash',
-      task_id: task.task_id,
-      category: task.category,
-      prompt: task.prompt,
-      raw_output: `Direct Gemini Error: ${err}`,
-      ground_truth: task.dynamic_ground_truth,
-      latency_ms: Date.now() - start
-    }
+    return new ModelOutput(model, task, `Direct Gemini Error: ${err}`, Date.now() - start)
   }
 }
 
@@ -127,30 +114,13 @@ async function runOpenRouterModel(task: EvalTask, modelSlug: string): Promise<Mo
 
     const outputText = response.choices?.[0]?.message?.content || ''
     if (!outputText) throw new Error('Empty API response choices returned.')
-
-    return {
-      model_name: modelSlug.replace(':free', ''),
-      task_id: task.task_id,
-      category: task.category,
-      prompt: task.prompt,
-      raw_output: outputText,
-      ground_truth: task.dynamic_ground_truth,
-      latency_ms: Date.now() - start
-    }
+    return new ModelOutput(modelSlug.replace(':free', ''), task, outputText || '', Date.now() - start)
   }
   catch (err) {
     logger.warn('Open Router provider transaction failed exception fallback active', {
       task_id: task.task_id,
       error_message: err instanceof Error ? err.message : String(err)
     })
-    return {
-      model_name: modelSlug.replace(':free', ''),
-      task_id: task.task_id,
-      category: task.category,
-      prompt: task.prompt,
-      raw_output: `OpenRouter Error: ${err}`,
-      ground_truth: task.dynamic_ground_truth,
-      latency_ms: Date.now() - start
-    }
+    return new ModelOutput(modelSlug.replace(':free', ''), task, `OpenRouter Error: ${err}`, Date.now() - start)
   }
 }

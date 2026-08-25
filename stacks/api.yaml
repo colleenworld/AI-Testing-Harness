@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Public dashboard API for the Evaluation Harness
+
+Parameters:
+  ProjectName:
+    Type: String
+
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - test
+      - prod
+
+  FrontendOrigin:
+    Type: String
+    Description: Origin permitted to call the API, without a trailing slash
+
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+
+  LambdaExecutionRole:
+    Type: String
+    Description: ARN of the shared Lambda execution role
+
+  LambdaSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+
+  DatabaseEndpoint:
+    Type: String
+
+  DatabasePort:
+    Type: String
+
+  DatabaseName:
+    Type: String
+
+  DatabaseSecretArn:
+    Type: String
+
+Resources:
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "${Environment}-${ProjectName}-api"
+      StageName: !Ref Environment
+
+      Cors:
+        AllowOrigin: !Sub "'${FrontendOrigin}'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowMethods: "'GET,OPTIONS'"
+        MaxAge: "'600'"
+
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: !Sub "'${FrontendOrigin}'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+              Access-Control-Allow-Methods: "'GET,OPTIONS'"
+
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: !Sub "'${FrontendOrigin}'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+              Access-Control-Allow-Methods: "'GET,OPTIONS'"
+
+      EndpointConfiguration:
+        Type: REGIONAL
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${Environment}-${ProjectName}-api"
+      RetentionInDays: !Ref LogRetentionDays
+
+  ApiHandlerLambda:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - ApiLogGroup
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2022
+        Sourcemap: true
+        EntryPoints:
+          - apiHandler.ts
+        Loader:
+          - .pem=text
+    Properties:
+      FunctionName: !Sub "${Environment}-${ProjectName}-api"
+      Description: Serves evaluation results to the frontend dashboard
+
+      CodeUri: ../src
+      Handler: apiHandler.handler
+      Runtime: nodejs24.x
+
+      Architectures:
+        - x86_64
+
+      MemorySize: 512
+      Timeout: 30
+      Tracing: Active
+
+      Role: !Ref LambdaExecutionRole
+
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+        SubnetIds: !Ref PrivateSubnetIds
+
+      Layers:
+        - !Sub >-
+          {{resolve:ssm:/aws/service/aws-parameters-and-secrets-lambda-extension/x86/latest}}
+
+      Environment:
+        Variables:
+          NODE_ENV: !Ref Environment
+          FRONTEND_ORIGIN: !Ref FrontendOrigin
+
+          PARAMETERS_SECRETS_EXTENSION_HTTP_PORT: '2773'
+          PARAMETERS_SECRETS_EXTENSION_LOG_LEVEL: INFO
+          SECRETS_MANAGER_TTL: '300'
+
+          DB_HOST: !Ref DatabaseEndpoint
+          DB_PORT: !Ref DatabasePort
+          DB_NAME: !Ref DatabaseName
+          DB_SECRET_ARN: !Ref DatabaseSecretArn
+
+      Events:
+        GetEvaluationsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /v1/evaluations
+            Method: GET
+
+Outputs:
+  ApiGatewayBaseUrl:
+    Description: Base URL of the Evaluation Harness API
+    Value: !Sub >-
+      https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+
+  ApiGatewayUrl:
+    Description: URL for retrieving evaluation results
+    Value: !Sub >-
+      https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/v1/evaluations
+
+  ApiGatewayId:
+    Description: API Gateway REST API ID
+    Value: !Ref ApiGateway
+
+  ApiHandlerLambdaArn:
+    Description: ARN of the API Lambda
+    Value: !GetAtt ApiHandlerLambda.Arn

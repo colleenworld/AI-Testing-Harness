@@ -1,3 +1,5 @@
+import { ModelOutput } from './class/ModelOutput'
+
 export interface RunnerEvent {
   execution_id: string;
   hydrated_tasks: EvalTask[];
@@ -13,16 +15,6 @@ export interface EvalTask {
   category: string;
   prompt: string;
   dynamic_ground_truth: string;
-}
-
-export interface ModelOutput {
-  model_name: string;
-  task_id: string;
-  category: string;
-  prompt: string;
-  raw_output: string;
-  ground_truth: string;
-  latency_ms: number;
 }
 
 export interface JudgeScores {
