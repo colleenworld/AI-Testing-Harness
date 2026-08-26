@@ -1,11 +1,10 @@
 import { describe, expect, test, jest } from '@jest/globals'
 import { z } from 'zod'
-import { handler } from '../hydrate'
-jest.mock('../lib/dbPool')
-import pool from '../lib/dbPool'
 
+jest.mock('../lib/dbPool', () => ({
+  safeQuery: jest.fn()
+}))
 // Cast the database instance into a Jest Mock type to cleanly read your .toHaveBeenCalled assertions
-const mockedPool = pool as jest.Mocked<typeof pool>
 const HydratedTaskSchema = z.object({
   task_id: z.string(),
   category: z.string(),

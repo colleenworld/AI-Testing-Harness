@@ -1,59 +1,144 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals'
+import {
+  beforeEach,
+  describe,
+  expect,
+  it,
+  jest
+} from '@jest/globals'
+import type { APIGatewayProxyEvent } from 'aws-lambda'
 import { handler } from '../apiHandler'
-import { APIGatewayProxyEvent } from 'aws-lambda'
-import mockDbPool from '../lib/__mocks__/dbPool'
+import {
+  initializeDatabaseSchema,
+  safeQuery
+} from '../lib/dbPool'
 
-// Bind environmental credential variables before triggering execution suites
-const VALID_TOKEN = 'secret-auth-token-123'
-process.env.EXPECTED_API_KEY = VALID_TOKEN
+jest.mock('../lib/dbPool', () => ({
+  __esModule: true,
+  safeQuery: jest.fn(),
+  initializeDatabaseSchema: jest.fn()
+}))
 
-describe('🧪 ApiHandler Security Validation Suites', () => {
+const mockedSafeQuery =
+  jest.mocked(safeQuery)
+
+const mockedInitializeDatabaseSchema =
+  jest.mocked(initializeDatabaseSchema)
+
+process.env.FRONTEND_ORIGIN =
+  'https://llm-dashboard-dun.vercel.app'
+
+function createEvent(
+  category?: string
+): APIGatewayProxyEvent {
+  return {
+    headers: {},
+    queryStringParameters: category
+      ? { category }
+      : null
+  } as unknown as APIGatewayProxyEvent
+}
+
+function queryResult<T>(rows: T[]) {
+  return {
+    command: 'SELECT',
+    rowCount: rows.length,
+    oid: 0,
+    rows,
+    fields: []
+  }
+}
+
+describe('🧪 ApiHandler validation suite', () => {
   beforeEach(() => {
     jest.clearAllMocks()
+
+    mockedInitializeDatabaseSchema.mockResolvedValue(
+      undefined
+    )
   })
 
-  it('should reject requests with a 401 status if the X-Api-Key header is missing', async () => {
-    const dummyEvent = {
-      headers: {},
-      queryStringParameters: { category: 'All' }
-    } as unknown as APIGatewayProxyEvent
+  it('returns database rows without requiring an API key', async () => {
+    const mockRows = [
+      {
+        id: 1,
+        task_id: 'task_01',
+        category: 'Safety',
+        prompt: 'Test'
+      }
+    ]
 
-    const result = await handler(dummyEvent)
+    mockedSafeQuery.mockResolvedValueOnce(
+      queryResult(mockRows)
+    )
 
-    expect(result.statusCode).toBe(401)
-    expect(JSON.parse(result.body).error).toContain('Unauthorized')
-    expect(mockDbPool.safeQuery).not.toHaveBeenCalled()
-  })
-
-  it('should reject requests with a 401 status if the X-Api-Key is incorrect', async () => {
-    const dummyEvent = {
-      headers: { 'X-Api-Key': 'malicious-invalid-token' },
-      queryStringParameters: { category: 'All' }
-    } as unknown as APIGatewayProxyEvent
-
-    const result = await handler(dummyEvent)
-
-    expect(result.statusCode).toBe(401)
-    expect(mockDbPool.safeQuery).not.toHaveBeenCalled()
-  })
-
-  it('should pass validation and return database rows when a valid X-Api-Key header is provided', async () => {
-    const mockRows = [ { id: 1, task_id: 'task_01', category: 'Safety', prompt: 'Test' } ];
-    // @ts-ignore
-    (mockDbPool.safeQuery as jest.Mock).mockResolvedValueOnce({ rows: mockRows })
-
-    const dummyEvent = {
-      headers: { 'x-api-key': VALID_TOKEN }, // Testing lower-case key fallback properties
-      queryStringParameters: { category: 'Safety' }
-    } as unknown as APIGatewayProxyEvent
-
-    const result = await handler(dummyEvent)
+    const result = await handler(
+      createEvent('Safety')
+    )
 
     expect(result.statusCode).toBe(200)
     expect(JSON.parse(result.body)).toEqual(mockRows)
-    expect(mockDbPool.safeQuery).toHaveBeenCalledWith(
+
+    expect(
+      mockedInitializeDatabaseSchema
+    ).toHaveBeenCalledTimes(1)
+
+    expect(mockedSafeQuery).toHaveBeenCalledWith(
       expect.stringContaining('WHERE category = $1'),
       [ 'Safety' ]
+    )
+  })
+
+  it('does not require an X-Api-Key header', async () => {
+    mockedSafeQuery.mockResolvedValueOnce(
+      queryResult([])
+    )
+
+    const result = await handler(
+      createEvent('All')
+    )
+
+    expect(result.statusCode).toBe(200)
+
+    expect(
+      mockedInitializeDatabaseSchema
+    ).toHaveBeenCalledTimes(1)
+
+    expect(mockedSafeQuery).toHaveBeenCalled()
+  })
+
+  it('returns the configured CORS origin', async () => {
+    mockedSafeQuery.mockResolvedValueOnce(
+      queryResult([])
+    )
+
+    const result = await handler(
+      createEvent()
+    )
+
+    expect(
+      result.headers?.['Access-Control-Allow-Origin']
+    ).toBe(
+      'https://llm-dashboard-dun.vercel.app'
+    )
+
+    expect(result.headers?.Vary).toBe('Origin')
+  })
+
+  it('returns a 500 response when the database query fails', async () => {
+    mockedSafeQuery.mockRejectedValueOnce(
+      new Error('Database unavailable')
+    )
+
+    const result = await handler(
+      createEvent('Safety')
+    )
+
+    expect(result.statusCode).toBe(500)
+
+    expect(JSON.parse(result.body)).toEqual(
+      expect.objectContaining({
+        error: expect.any(String)
+      })
     )
   })
 })
