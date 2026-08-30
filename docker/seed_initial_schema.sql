@@ -216,7 +216,7 @@ VALUES
  'island active volcano tourism travel advisory safety warnings news'),
 ('task_5_10', 'Conversational Intent',
  'What happened to that crypto founder who went to trial? How many years did he actually get?',
- 'crypto founder criminal trial sentencing prison years verdict')ON CONFLICT (task_id) DO NOTHING;
+ 'crypto founder criminal trial sentencing prison years verdict') ON CONFLICT (task_id) DO NOTHING;
 COMMIT;
 
 
