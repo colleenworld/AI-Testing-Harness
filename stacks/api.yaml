@@ -49,7 +49,6 @@ Resources:
     Properties:
       Name: !Sub "${Environment}-${ProjectName}-api"
       StageName: !Ref Environment
-
       Cors:
         AllowOrigin: !Sub "'${FrontendOrigin}'"
         AllowHeaders: "'Content-Type,Authorization'"
@@ -77,7 +76,7 @@ Resources:
   ApiLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${Environment}-${ProjectName}-api"
+      LogGroupName: !Sub "/aws/lambda/${Environment}-${ProjectName}-api-v2"
       RetentionInDays: !Ref LogRetentionDays
 
   ApiHandlerLambda:
@@ -95,9 +94,8 @@ Resources:
         Loader:
           - .pem=text
     Properties:
-      FunctionName: !Sub "${Environment}-${ProjectName}-api"
+      FunctionName: !Sub "${Environment}-${ProjectName}-api-v2"
       Description: Serves evaluation results to the frontend dashboard
-
       CodeUri: ../src
       Handler: apiHandler.handler
       Runtime: nodejs24.x
@@ -124,7 +122,6 @@ Resources:
         Variables:
           NODE_ENV: !Ref Environment
           FRONTEND_ORIGIN: !Ref FrontendOrigin
-
           PARAMETERS_SECRETS_EXTENSION_HTTP_PORT: '2773'
           PARAMETERS_SECRETS_EXTENSION_LOG_LEVEL: INFO
           SECRETS_MANAGER_TTL: '300'

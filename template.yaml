@@ -28,15 +28,13 @@ Parameters:
       - 7
       - 30
 
-  RunnerSchedule:
+  PipeSchedule:
     Type: String
     Default: cron(0 2 * * ? *)
     Description: EventBridge schedule for evaluation runs
 
-  JudgeSchedule:
+  ApiSecretKeyArn:
     Type: String
-    Default: cron(30 2 * * ? *)
-    Description: EventBridge schedule for judging completed runs
 
 Resources:
   NetworkStack:
@@ -59,27 +57,15 @@ Resources:
         PrivateSubnetIds:
           !GetAtt NetworkStack.Outputs.PrivateSubnetIds
 
-  LambdaRoleStack:
+  LambdaStack:
     Type: AWS::Serverless::Application
     Properties:
-      Location: ./stacks/lambda_role.yaml
-      Parameters:
-        Environment: !Ref Environment
-        ProjectName: !Ref ProjectName
-        DatabaseSecretArn:
-          !GetAtt DatabaseStack.Outputs.DatabaseSecretArn
-
-  HydrateStack:
-    Type: AWS::Serverless::Application
-    Properties:
-      Location: ./stacks/hydrate.yaml
+      Location: ./stacks/lambda.yaml
       Parameters:
         Environment: !Ref Environment
         ProjectName: !Ref ProjectName
 
-        LambdaExecutionRole:
-          !GetAtt LambdaRoleStack.Outputs.LambdaExecutionRoleArn
-
+        Schedule: !Ref PipeSchedule
         LambdaSecurityGroupId:
           !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
 
@@ -98,71 +84,10 @@ Resources:
         DatabaseSecretArn:
           !GetAtt DatabaseStack.Outputs.DatabaseSecretArn
 
-        LogRetentionDays: !Ref LogRetentionDays
-
-  RunnerStack:
-    Type: AWS::Serverless::Application
-    Properties:
-      Location: ./stacks/runner.yaml
-      Parameters:
-        Environment: !Ref Environment
-        ProjectName: !Ref ProjectName
-
-        LambdaExecutionRole:
-          !GetAtt LambdaRoleStack.Outputs.LambdaExecutionRoleArn
-
-        LambdaSecurityGroupId:
-          !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
-
-        PrivateSubnetIds:
-          !GetAtt NetworkStack.Outputs.PrivateSubnetIds
-
-        DatabaseEndpoint:
-          !GetAtt DatabaseStack.Outputs.DatabaseEndpoint
-
-        DatabasePort:
-          !GetAtt DatabaseStack.Outputs.DatabasePort
-
-        DatabaseName:
-          !GetAtt DatabaseStack.Outputs.DatabaseName
-
-        DatabaseSecretArn:
-          !GetAtt DatabaseStack.Outputs.DatabaseSecretArn
+        ApiSecretKeyArn:
+          !Ref ApiSecretKeyArn
 
         LogRetentionDays: !Ref LogRetentionDays
-        Schedule: !Ref RunnerSchedule
-
-  JudgeStack:
-    Type: AWS::Serverless::Application
-    Properties:
-      Location: ./stacks/judge.yaml
-      Parameters:
-        Environment: !Ref Environment
-        ProjectName: !Ref ProjectName
-
-        LambdaExecutionRole:
-          !GetAtt LambdaRoleStack.Outputs.LambdaExecutionRoleArn
-
-        LambdaSecurityGroupId:
-          !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
-
-        PrivateSubnetIds:
-          !GetAtt NetworkStack.Outputs.PrivateSubnetIds
-
-        DatabaseEndpoint:
-          !GetAtt DatabaseStack.Outputs.DatabaseEndpoint
-
-        DatabasePort:
-          !GetAtt DatabaseStack.Outputs.DatabasePort
-
-        DatabaseName:
-          !GetAtt DatabaseStack.Outputs.DatabaseName
-
-        DatabaseSecretArn:
-          !GetAtt DatabaseStack.Outputs.DatabaseSecretArn
-
-        LogRetentionDays: !Ref LogRetentionDays
-        Schedule: !Ref JudgeSchedule
 
   ApiStack:
     Type: AWS::Serverless::Application
@@ -174,7 +99,7 @@ Resources:
         FrontendOrigin: !Ref FrontendOrigin
 
         LambdaExecutionRole:
-          !GetAtt LambdaRoleStack.Outputs.LambdaExecutionRoleArn
+          !GetAtt LambdaStack.Outputs.LambdaExecutionRoleArn
 
         LambdaSecurityGroupId:
           !GetAtt NetworkStack.Outputs.LambdaSecurityGroupId
@@ -211,12 +136,8 @@ Outputs:
 
   HydrateLambdaArn:
     Description: Hydrate Lambda ARN
-    Value: !GetAtt HydrateStack.Outputs.HydrateLambdaArn
+    Value: !GetAtt LambdaStack.Outputs.HydrateLambdaArn
 
-  RunnerLambdaArn:
-    Description: Runner Lambda ARN
-    Value: !GetAtt RunnerStack.Outputs.RunnerLambdaArn
-
-  JudgeLambdaArn:
-    Description: Judge Lambda ARN
-    Value: !GetAtt JudgeStack.Outputs.JudgeLambdaArn
+  PipeLambdaArn:
+    Description: Pipe Lambda ARN
+    Value: !GetAtt LambdaStack.Outputs.PipeLambdaArn

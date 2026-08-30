@@ -1,0 +1,248 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Scheduled Pipe Lambda for the Evaluation Harness
+
+Parameters:
+  ProjectName:
+    Type: String
+
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - test
+      - prod
+
+  Schedule:
+    Type: String
+    Description: EventBridge schedule expression for the Pipe Lambda
+
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+
+  LambdaSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for Evaluation Harness Lambda functions
+
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs in which Lambda network interfaces are created
+
+  DatabaseEndpoint:
+    Type: String
+
+  DatabasePort:
+    Type: String
+
+  DatabaseName:
+    Type: String
+
+  DatabaseSecretArn:
+    Type: String
+
+  ApiSecretKeyArn:
+    Type: String
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+
+      ManagedPolicyArns:
+        - !Sub >-
+          arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - !Sub >-
+          arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess
+
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+      Policies:
+        - PolicyName: ReadDatabaseCredentials
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadDatabaseSecret
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                - !Ref DatabaseSecretArn
+                - !Ref ApiSecretKeyArn
+
+        - PolicyName: LambdaLogging
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${Environment}-${ProjectName}-hydrate-v2:*"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${Environment}-${ProjectName}-pipe-v2:*"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${Environment}-${ProjectName}-api-handler-v2:*"
+        - PolicyName: XrayTelemetryAuth
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: "*"
+
+  HydrateLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${Environment}-${ProjectName}-hydrate-v2"
+      RetentionInDays: !Ref LogRetentionDays
+
+  HydrateLambda:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - HydrateLogGroup
+    Properties:
+      FunctionName: !Sub "${Environment}-${ProjectName}-hydrate-v2"
+      Description: Hydrates evaluation data for subsequent model runs
+      CodeUri: ../src
+      Handler: hydrate.handler
+      Runtime: nodejs24.x
+
+      Architectures:
+        - x86_64
+
+      MemorySize: 512
+      Timeout: 30
+      Tracing: Active
+      Role: !GetAtt LambdaExecutionRole.Arn
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+        SubnetIds: !Ref PrivateSubnetIds
+
+      Layers:
+        - !Sub >-
+          {{resolve:ssm:/aws/service/aws-parameters-and-secrets-lambda-extension/x86/latest}}
+
+      Environment:
+        Variables:
+          NODE_ENV: !Ref Environment
+          PARAMETERS_SECRETS_EXTENSION_HTTP_PORT: '2773'
+          PARAMETERS_SECRETS_EXTENSION_LOG_LEVEL: INFO
+          SECRETS_MANAGER_TTL: '300'
+          DB_HOST: !Ref DatabaseEndpoint
+          DB_PORT: !Ref DatabasePort
+          DB_NAME: !Ref DatabaseName
+          DB_SECRET_ARN: !Ref DatabaseSecretArn
+          API_KEYS_SECRET_ARN: !Ref ApiSecretKeyArn
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - hydrate.ts
+        Target: es2022
+        Minify: true
+        Sourcemap: true
+        Loader:
+          - .pem=text
+
+  PipeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${Environment}-${ProjectName}-pipe-v2"
+      RetentionInDays: !Ref LogRetentionDays
+
+  PipeLambda:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - PipeLogGroup
+    Properties:
+      FunctionName: !Sub "${Environment}-${ProjectName}-pipe-v2"
+      Description: Runs concurrent evaluation model batches on a schedule
+      CodeUri: ../src/pipeline
+      Handler: pipeline.handler
+      Runtime: nodejs24.x
+
+      Architectures:
+        - x86_64
+
+      MemorySize: 512
+      Timeout: 30
+      Tracing: Active
+      Role: !GetAtt LambdaExecutionRole.Arn
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+        SubnetIds: !Ref PrivateSubnetIds
+
+      Layers:
+        - !Sub >-
+          {{resolve:ssm:/aws/service/aws-parameters-and-secrets-lambda-extension/x86/latest}}
+
+      Environment:
+        Variables:
+          NODE_ENV: !Ref Environment
+          PARAMETERS_SECRETS_EXTENSION_HTTP_PORT: '2773'
+          PARAMETERS_SECRETS_EXTENSION_LOG_LEVEL: INFO
+          SECRETS_MANAGER_TTL: '300'
+          DB_HOST: !Ref DatabaseEndpoint
+          DB_PORT: !Ref DatabasePort
+          DB_NAME: !Ref DatabaseName
+          DB_SECRET_ARN: !Ref DatabaseSecretArn
+          API_KEYS_SECRET_ARN: !Ref ApiSecretKeyArn
+
+      Events:
+        PipeSchedule:
+          Type: Schedule
+          Properties:
+            Name: !Sub "${Environment}-${ProjectName}-pipe-schedule"
+            Schedule: !Ref Schedule
+            Description: Runs model evaluation batches after hydration
+            Enabled: true
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - pipeline.ts
+        Target: es2022
+        Minify: true
+        Sourcemap: true
+        Loader:
+          - .pem=text
+
+Outputs:
+  LambdaExecutionRoleArn:
+    Description: Lambda function name
+    Value: !GetAtt LambdaExecutionRole.Arn
+
+  HydrateLambdaArn:
+    Description: ARN of the hydrate lambda function
+    Value: !GetAtt HydrateLambda.Arn
+
+  HydrateLambdaName:
+    Description: Name of the hydrate lambda function
+    Value: !Ref HydrateLambda
+
+  PipeLambdaArn:
+    Description: ARN of the Pipe Lambda function
+    Value: !GetAtt LambdaExecutionRole.Arn
+
+  PipeLambdaName:
+    Description: Name of the Pipe Lambda function
+    Value: !Ref PipeLambda
+
+  PipeScheduleName:
+    Description: Name of the Pipe EventBridge schedule
+    Value: !Sub "${Environment}-${ProjectName}-pipe-schedule"
+
+  PipeLogGroupName:
+    Description: CloudWatch Logs log group for the Pipe Lambda
+    Value: !Ref PipeLogGroup
