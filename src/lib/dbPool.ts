@@ -2,53 +2,16 @@ import { Pool, type PoolConfig } from 'pg'
 import { logger } from './logger'
 import { schema } from './schema'
 import rdsCaBundle from './rds-global-bundle.pem'
-
-interface DatabaseSecret {
-  username: string;
-  password: string;
-}
+import { whisper, DatabaseSecret } from './secret'
 
 let pool: Pool | undefined
-
-async function getCredentials(): Promise<DatabaseSecret> {
-  const secretArn = process.env.DB_SECRET_ARN
-
-  if (!secretArn) {
-    throw new Error('DB_SECRET_ARN is not configured')
-  }
-
-  const response = await fetch(
-    'http://localhost:2773/secretsmanager/get' +
-      `?secretId=${encodeURIComponent(secretArn)}`,
-    {
-      headers: {
-        'X-Aws-Parameters-Secrets-Token':
-              process.env.AWS_SESSION_TOKEN ?? ''
-      }
-    }
-  )
-
-  if (!response.ok) {
-    throw new Error(
-      `Failed to retrieve database credentials: ${response.status}`
-    )
-  }
-
-  const responseBody = await response.json() as {
-    SecretString: string;
-  }
-
-  return JSON.parse(
-    responseBody.SecretString
-  ) as DatabaseSecret
-}
 
 export async function getPool(): Promise<Pool> {
   if (pool) {
     return pool
   }
 
-  const credentials = await getCredentials()
+  const credentials = await whisper<DatabaseSecret>('DB_SECRET_ARN')
 
   const poolSettings: PoolConfig = {
     host: process.env.DB_HOST,

@@ -7,7 +7,7 @@ s3_prefix = "evaluation"
 confirm_changeset = true
 capabilities = "CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
 image_repositories = []
-parameter_overrides = "Environment=\"dev\" ProjectName=\"evaluation\" LogRetentionDays=\"7\" RunnerSchedule=\"cron(0 2 * * ? *)\" JudgeSchedule=\"cron(30 2 * * ? *)\""
+parameter_overrides = "Environment=\"dev\" ProjectName=\"evaluation\" FrontendOrigin=\"'https://llm-dashboard-dun.vercel.app,http://37.120.205.150:3000,http://192.168.1.78:3000,http://localhost:3000'\" LogRetentionDays=\"7\" PipeSchedule=\"cron(0 2 * * ? *)\" ApiSecretKeyArn=\"arn:aws:secretsmanager:us-west-2:808822697548:secret:evaluation-apikeys-ENeuHf\""
 disable_rollback = false
 [default.global.parameters]
 region = "us-west-2"

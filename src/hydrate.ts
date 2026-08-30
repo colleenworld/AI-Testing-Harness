@@ -1,49 +1,61 @@
 import type { Handler } from 'aws-lambda'
 import axios from 'axios'
 import { safeQuery } from './lib/dbPool'
-import type {
-  TaskRow,
-  HydratedTask,
-  HydrateEvent
-} from './lib/types'
 import { logger } from './lib/logger'
+import { ApiKeysSecret, whisper } from './lib/secret'
 
-export const handler: Handler<HydrateEvent, any> = async (event) => {
-  const execution_id =
-    event.execution_id || `run_${Date.now()}`
+interface HydratedTask {
+  task_id: string;
+  category: string;
+  prompt: string;
+  dynamic_ground_truth: string;
+}
+
+export interface HydratedTaskRow {
+  task_id: string;
+  category: string;
+  prompt: string;
+  search_query_template: string; // E.g., "Perplexity corporate earnings results August 2026"
+}
+
+interface HydrateEvent {
+  execution_id?: string;
+}
+
+export const handler: Handler<HydrateEvent, any> = async event => {
+  const executionId =
+    event.execution_id ?? `run_${Date.now()}`
+  const apiKeys = await whisper<ApiKeysSecret>('API_KEYS_SECRET_ARN')
 
   try {
-    const queryText = `
-      SELECT
-        task_id,
-        category,
-        prompt,
-        search_query_template
-      FROM golden_tasks
-      LIMIT 50
-    `
+    const result = await safeQuery(
+      `SELECT
+         task_id,
+         category,
+         prompt,
+         search_query_template
+       FROM golden_tasks
+       ORDER BY task_id
+       LIMIT 50`
+    )
 
-    const result = await safeQuery(queryText)
-    const sourceTasks = result.rows as TaskRow[]
+    const sourceTasks = result.rows as HydratedTaskRow[]
 
     const hydrationPromises = sourceTasks.map(
       async (task): Promise<HydratedTask> => {
         let liveContext = 'No live lookup required.'
-
         if (task.search_query_template) {
           try {
             liveContext = await fetchLiveWebContext(
-              task.search_query_template
+              task.search_query_template,
+              apiKeys
             )
           }
           catch (error: unknown) {
-            logger.error('Failed live search for task', {
-              execution_id,
-              taskId: task.task_id,
-              error:
-                    error instanceof Error
-                      ? error.message
-                      : String(error)
+            logger.error('Failed in live search for task', {
+              execution_id: executionId,
+              task_id: task.task_id,
+              error: getErrorMessage(error)
             })
 
             liveContext =
@@ -51,12 +63,26 @@ export const handler: Handler<HydrateEvent, any> = async (event) => {
           }
         }
 
+        const dynamicGroundTruth =
+          `[Verified Fact Context]: ${liveContext}`
+
+        await safeQuery(
+          `UPDATE golden_tasks
+           SET
+             dynamic_ground_truth = $1,
+             updated_at = CURRENT_TIMESTAMP
+           WHERE task_id = $2`,
+          [
+            dynamicGroundTruth,
+            task.task_id
+          ]
+        )
+
         return {
           task_id: task.task_id,
           category: task.category,
           prompt: task.prompt,
-          dynamic_ground_truth:
-                `[Verified Fact Context]: ${liveContext}`
+          dynamic_ground_truth: dynamicGroundTruth
         }
       }
     )
@@ -65,8 +91,13 @@ export const handler: Handler<HydrateEvent, any> = async (event) => {
       hydrationPromises
     )
 
+    logger.info('Dataset hydration completed', {
+      execution_id: executionId,
+      hydrated_task_count: hydratedTasks.length
+    })
+
     return {
-      execution_id,
+      execution_id: executionId,
       hydrated_tasks: hydratedTasks
     }
   }
@@ -74,31 +105,23 @@ export const handler: Handler<HydrateEvent, any> = async (event) => {
     logger.error(
       'Critical failure during dataset hydration stage',
       {
-        execution_id,
-        error:
-              error instanceof Error
-                ? error.message
-                : String(error)
+        execution_id: executionId,
+        error: getErrorMessage(error)
       }
     )
-
     throw error
   }
 }
 
 async function fetchLiveWebContext(
-  query: string
+  query: string,
+  apiKeys: ApiKeysSecret
 ): Promise<string> {
-  const tavilyApiKey = process.env.TAVILY_API_KEY
-
-  if (!tavilyApiKey) {
-    throw new Error('TAVILY_API_KEY is not configured')
-  }
 
   const response = await axios.post(
-    'https://tavily.com',
+    'https://api.tavily.com/search',
     {
-      api_key: tavilyApiKey,
+      api_key: apiKeys.TAVILY_API_KEY,
       query,
       search_depth: 'basic',
       include_answer: true,
@@ -111,6 +134,12 @@ async function fetchLiveWebContext(
 
   return (
     response.data.answer ??
-      JSON.stringify(response.data.results)
+        JSON.stringify(response.data.results)
   )
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : String(error)
 }
