@@ -5,17 +5,17 @@ import {
   jest,
   test
 } from '@jest/globals'
-import { Context } from 'aws-lambda'
 import OpenAI from 'openai'
 import { GoogleGenAI } from '@google/genai'
-import { handler } from '../stages/runner'
-import {
-  RunnerEvent,
-  RunnerResult
-} from '../lib/types'
+import { runEvaluations, RunnerResult } from '../pipeline/runner'
 import { safeQuery } from '../lib/dbPool'
-import { ModelOutput } from '../lib/class/ModelOutput'
-
+import { ModelOutput } from '../lib/types'
+const fakeKeys = {
+  TAVILY_API_KEY: 'test-tavily-key',
+  OPENROUTER_API_KEY: 'test-openrouter-key',
+  GEMINI_API_KEY: 'test-gemini-key',
+  OPENAI_API_KEY: 'test-openai-key',
+}
 const mockGenerateContent = jest.fn(
   async () => ({
     text: 'Mock direct Gemini response'
@@ -62,9 +62,6 @@ describe('🤖 Production Parallel Model Runner Suite', () => {
   beforeEach(() => {
     jest.clearAllMocks()
 
-    process.env.GEMINI_API_KEY = 'test-gemini-key'
-    process.env.OPENROUTER_API_KEY = 'test-openrouter-key'
-
     mockGenerateContent.mockImplementation(async () => ({
       text: 'Mock direct Gemini response'
     }))
@@ -110,14 +107,11 @@ describe('🤖 Production Parallel Model Runner Suite', () => {
   })
 
   test('maps database tasks to all configured model providers', async () => {
-    const event: RunnerEvent = {
-      execution_id: 'run-sync-test'
-    }
+    const execution_id ='run-sync-test'
 
-    const result = await handler(
-      event,
-      {} as Context,
-      jest.fn()
+    const result = await runEvaluations(
+      fakeKeys,
+      execution_id
     ) as RunnerResult
 
     expect(result.execution_id).toBe('run-sync-test')

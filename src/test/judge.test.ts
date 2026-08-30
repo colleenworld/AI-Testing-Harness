@@ -7,9 +7,14 @@ import {
 } from '@jest/globals'
 import { Context } from 'aws-lambda'
 import { GoogleGenAI } from '@google/genai'
-import { handler } from '../stages/judge'
+import { judgeResults } from '../pipeline/judge'
 import { safeQuery } from '../lib/dbPool'
-import { JudgeEvent } from '../lib/types'
+import { ModelOutput } from '../lib/types'
+
+interface JudgeEvent {
+  execution_id: string;
+  results: ModelOutput[];
+}
 
 const mockGenerateContent = jest.fn<
   (request: unknown) => Promise<{ text: string }>
@@ -30,6 +35,13 @@ const MockedGoogleGenAI =
 
 const mockedSafeQuery =
   jest.mocked(safeQuery)
+
+const fakeKeys = {
+  TAVILY_API_KEY: 'test-tavily-key',
+  OPENROUTER_API_KEY: 'test-openrouter-key',
+  GEMINI_API_KEY: 'test-gemini-key',
+  OPENAI_API_KEY: 'test-openai-key',
+}
 
 describe('⚖️ Production LLM-as-a-Judge Handler Suite', () => {
   beforeEach(() => {
@@ -63,25 +75,22 @@ describe('⚖️ Production LLM-as-a-Judge Handler Suite', () => {
   })
 
   it('processes and saves valid judge scores', async () => {
-    const event: JudgeEvent = {
-      execution_id: 'test-execution-123',
-      results: [
-        {
-          task_id: 'task_1_01',
-          category: 'Testing',
-          model_name: 'test-model',
-          prompt: 'Test prompt',
-          raw_output: 'Test model output',
-          ground_truth: 'Expected answer',
-          latency_ms: 100
-        }
-      ]
-    }
+    const results =  [
+      {
+        task_id: 'task_1_01',
+        category: 'Testing',
+        model_name: 'test-model',
+        prompt: 'Test prompt',
+        raw_output: 'Test model output',
+        ground_truth: 'Expected answer',
+        latency_ms: 100
+      }
+    ]
 
-    const result = await handler(
-      event,
-      {} as Context,
-      jest.fn()
+    const result = await judgeResults(
+      fakeKeys,
+      'test-execution-123',
+      results
     )
 
     expect(result).toEqual({
