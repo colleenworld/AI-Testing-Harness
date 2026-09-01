@@ -1,4 +1,4 @@
-const {defineConfig} = require('jest');
+import { defineConfig } from 'jest'
 
 module.exports = defineConfig({
     preset: 'ts-jest',

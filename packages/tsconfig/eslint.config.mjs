@@ -10,7 +10,7 @@ export default [
                     modules: true
                 },
                 ecmaVersion: 'latest',
-                project: './tsconfig.json',
+                project: './base.json',
             }
         }
     },

@@ -1,52 +1,32 @@
 {
-  "name": "evaluation-harness",
-  "version": "1.0.0",
-  "description": "",
-  "main": "dist/index.js",
+  "name": "evaluation-harness-root",
+  "private": true,
   "scripts": {
-    "build": "tsc",
-    "test": "jest",
-    "test:coverage": "jest --coverage",
-    "lint": "eslint --fix --ext ./src/**/*.ts ."
+    "build": "turbo run build",
+    "start:dev": "turbo run dev"
   },
-  "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "^3.600.0",
-    "@aws-sdk/client-secrets-manager": "^3.1114.0",
-    "@google/genai": "^2.16.0",
-    "@openrouter/sdk": "^1.2.83",
-    "axios": "^1.19.0",
-    "openai": "^7.4.0",
-    "p-limit": "^7.3.1",
-    "pg": "^8.23.0",
-    "winston": "^3.19.0",
-    "zod": "^3.25.76"
-  },
+  "packageManager": "pnpm@9.0.0",
   "devDependencies": {
     "@stylistic/eslint-plugin": "^5.10.0",
     "@stylistic/eslint-plugin-ts": "^4.4.1",
-    "@types/aws-lambda": "^8.10.143",
+    "@eslint/js": "^10.0.1",
     "@types/jest": "^30.0.0",
-    "@types/node": "^20.14.0",
-    "@types/pg": "^8.21.0",
     "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.67.0",
     "esbuild": "0.28.2",
-    "eslint": "^10.8.1",
+    "eslint": "^10.9.1",
     "eslint-plugin-jsdoc": "^63.0.2",
     "jest": "^30.4.2",
     "jest-html-reporter": "^4.4.0",
     "jsdoc": "^4.0.5",
     "jsdoc-babel": "^0.5.0",
     "prettier": "^3.9.6",
+    "turbo": "^2.10.12",
+    "typescript-eslint": "^8.69.0",
     "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
-    "typescript": "^5.4.5"
-  },
-  "private": true,
-  "allowScripts": {
-    "@google/genai@2.17.1": true,
-    "esbuild@0.28.2": true,
-    "protobufjs@7.6.5": true,
-    "unrs-resolver@1.12.2": true
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3",
+    "@types/node": "^20.14.0"
   }
 }
