@@ -26,7 +26,7 @@ export default [
     },
     {
         plugins: { '@stylistic': stylistic },
-        files: [ 'src/**/*.ts' ],
+        files: [ 'apps/**/*.ts', 'apps/**/*.tsx' ],
         rules: {
             '@stylistic/indent': [ 'error', 2 ],
             '@stylistic/array-element-newline': [ 'error', 'consistent' ],

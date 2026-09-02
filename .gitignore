@@ -19,3 +19,6 @@ samconfig.toml
 /**/env.json
 env.json
 locals.json
+
+/.turbo
+/.turbo/**/*.*

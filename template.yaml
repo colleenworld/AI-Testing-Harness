@@ -40,7 +40,7 @@ Resources:
   NetworkStack:
     Type: AWS::Serverless::Application
     Properties:
-      Location: ./stacks/network.yaml
+      Location: ./apps/harness/stacks/network.yaml
       Parameters:
         Environment: !Ref Environment
         ProjectName: !Ref ProjectName
@@ -48,7 +48,7 @@ Resources:
   DatabaseStack:
     Type: AWS::Serverless::Application
     Properties:
-      Location: ./stacks/database.yaml
+      Location: ./apps/harness/stacks/database.yaml
       Parameters:
         Environment: !Ref Environment
         ProjectName: !Ref ProjectName
@@ -60,7 +60,7 @@ Resources:
   LambdaStack:
     Type: AWS::Serverless::Application
     Properties:
-      Location: ./stacks/lambda.yaml
+      Location: ./apps/harness/stacks/lambda.yaml
       Parameters:
         Environment: !Ref Environment
         ProjectName: !Ref ProjectName
@@ -92,7 +92,7 @@ Resources:
   ApiStack:
     Type: AWS::Serverless::Application
     Properties:
-      Location: ./stacks/api.yaml
+      Location: ./apps/harness/stacks/api.yaml
       Parameters:
         Environment: !Ref Environment
         ProjectName: !Ref ProjectName
