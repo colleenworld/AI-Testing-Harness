@@ -1,15 +1,13 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { Pool, type PoolConfig } from 'pg'
 import { logger } from './logger'
 import { schema } from './schema'
-const certPath = path.join(__dirname, 'rds-global-bundle.pem');
-const rdsCert = fs.readFileSync(certPath, 'utf8');
 import { whisper, DatabaseSecret } from './secret'
+import caCert from './rds-global-bundle.pem'
 
 let pool: Pool | undefined
 
 export async function getPool(): Promise<Pool> {
+
   if (pool) {
     return pool
   }
@@ -27,7 +25,7 @@ export async function getPool(): Promise<Pool> {
     connectionTimeoutMillis: 5000,
     ssl: {
       rejectUnauthorized: true,
-      ca: [rdsCert]
+      ca: caCert
     }
   }
 

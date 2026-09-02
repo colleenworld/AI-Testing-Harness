@@ -19,10 +19,6 @@ export async function handler(
   }
 
   try {
-    /*
-     * safeQuery() already initializes the schema when required,
-     * so initializeDatabaseSchema() must not be called separately.
-     */
     const category =
       event.queryStringParameters?.category ?? 'All'
 
@@ -106,6 +102,9 @@ function resolveCorsOrigin(
   const requestOrigin =
     event.headers.origin ??
       event.headers.Origin
+
+  if ( requestOrigin && allowedOrigins.includes('*'))
+    return '*'
 
   if (
     requestOrigin &&

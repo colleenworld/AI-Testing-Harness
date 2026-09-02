@@ -51,10 +51,9 @@ Resources:
       StageName: !Ref Environment
       Cors:
         AllowOrigin: !Sub "'${FrontendOrigin}'"
-        AllowHeaders: "'Content-Type,Authorization'"
+        AllowHeaders: "'Content-Type,Authorization,X-Api-Key'"
         AllowMethods: "'GET,OPTIONS'"
         MaxAge: "'600'"
-
       GatewayResponses:
         DEFAULT_4XX:
           ResponseParameters:
